@@ -142,12 +142,6 @@ allocproc(void)
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
-  
-  /* Changing this so that we know what index of ptable proc is in (corresponds to pstat?)
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == UNUSED)
-      goto found;
-      */
 
   release(&ptable.lock);
   return 0;
@@ -186,6 +180,7 @@ found:
   }
   p->indexInPStat = nextIndexInPStat;
   p->timeToSleep = 0;
+  p->compTicks = 0;
   pstat.inuse[nextIndexInPStat] = 1;
   pstat.pid[nextIndexInPStat] = p->pid;
   pstat.timeslice[nextIndexInPStat] = 1;
@@ -409,44 +404,65 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
-  for(;;){
-    // Enable interrupts on this processor.
-    sti();
-
-    // Loop over process table looking for process to run.
-    acquire(&ptable.lock);
-    //while(!isEmpty()) {
-    //for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-    if(!isEmpty()) {
+    
+    for(;;){
+      // Enable interrupts on this processor.
+      sti();
       
-      p = pop();
-      if(p->state != RUNNABLE && p->state != RUNNING) {
-        //p->state = RUNNABLE;
-        insert(p);
-        release(&ptable.lock);
-        continue;
+      // Loop over process table looking for process to run.
+      acquire(&ptable.lock);
+      
+      struct proc *currProc = c->proc;
+      
+      if (currProc != 0) {
+        if (currProc->remainingTicks != 0 && currProc->state == RUNNING) {
+          currProc->remainingTicks--;
+          pstat.schedticks[currProc->indexInPStat]++;
+          release(&ptable.lock);
+          continue;
+        } else { 
+          int compUsed = currProc->ticksThisSched - currProc->remainingTicks - pstat.timeslice[currProc->indexInPStat];
+          if (compUsed > 0) {
+            pstat.compticks[currProc->indexInPStat] += compUsed;
+          }
+          currProc->compTicks = 0;
+          insert(currProc);
+          c->proc = 0;
+        }
       }
-
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
-
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
-
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
-      //if (p->state == RUNNABLE || p->state == RUNNING)
-      insert(p);
+      //while(!isEmpty()) {
+      //for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+      if(!isEmpty()) {
+        
+        p = pop();
+        if(p->state != RUNNABLE && p->state != RUNNING) {
+          insert(p);
+          release(&ptable.lock);
+          continue;
+        }
+  
+        // Switch to chosen process.  It is the process's job
+        // to release ptable.lock and then reacquire it
+        // before jumping back to us.
+        c->proc = p;
+        p->remainingTicks = pstat.timeslice[p->indexInPStat] + p->compTicks;
+        p->ticksThisSched = p->remainingTicks;
+        pstat.switches[p->indexInPStat]++;
+        p->compTicks = 0;
+        switchuvm(p);
+        p->state = RUNNING;
+  
+        swtch(&(c->scheduler), p->context);
+        switchkvm();
+  
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        //c->proc = 0;
+        //if (p->state == RUNNABLE || p->state == RUNNING)
+        //insert(p);
+      }
+      release(&ptable.lock);
     }
-    release(&ptable.lock);
-
-  }
 }
 
 // Enter scheduler.  Must hold only ptable.lock
@@ -535,6 +551,7 @@ sleep(void *chan, struct spinlock *lk)
   
   p->timeToSleep--;
   p->compTicks++;
+  pstat.sleepticks[p->indexInPStat]++;
   
   sched();
 

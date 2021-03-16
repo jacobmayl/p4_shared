@@ -32,7 +32,7 @@ main(int argc, char **argv)
   
   for (int i = 0; i < NPROC; i++) {
     if (stats->pid[i] < 1) {
-      printf(1, "Process not found at index %d\n", i);
+      continue;
     } else {
       printf(1, "Process at index %d has pid %d\n", i, stats->pid[i]);
     }

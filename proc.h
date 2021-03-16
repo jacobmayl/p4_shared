@@ -53,6 +53,8 @@ struct proc {
   int indexInPStat;            // Index of process information in pstat
   int timeToSleep;
   int compTicks;
+  int remainingTicks;
+  int ticksThisSched;
 };
 
 // Process memory is laid out contiguously, low addresses first:
